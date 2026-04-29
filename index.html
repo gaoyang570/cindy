@@ -2003,45 +2003,223 @@
 
     <script>
         (function() {
-            function loadSDK() {
+            console.log('[Coze SDK] 开始初始化流程...');
+            
+            var SDK_URL = 'https://lf-cdn.coze.cn/obj/unpkg/flow-platform/chat-app-sdk/1.2.0-beta.19/libs/cn/index.js';
+            var MAX_WAIT_TIME = 20000;
+            var RETRY_INTERVAL = 1000;
+            var cozeClientInitialized = false;
+
+            function log(message, type) {
+                type = type || 'info';
+                var timestamp = new Date().toLocaleTimeString();
+                var prefix = '[Coze SDK ' + timestamp + ']';
+                switch(type) {
+                    case 'error':
+                        console.error(prefix, message);
+                        break;
+                    case 'warn':
+                        console.warn(prefix, message);
+                        break;
+                    default:
+                        console.log(prefix, message);
+                }
+            }
+
+            function loadSDKScript() {
                 return new Promise(function(resolve, reject) {
                     if (window.CozeWebSDK) {
+                        log('SDK已存在，无需重复加载');
                         resolve();
                         return;
                     }
+
+                    log('开始加载SDK脚本: ' + SDK_URL);
                     var script = document.createElement('script');
-                    script.src = 'https://lf-cdn.coze.cn/obj/unpkg/flow-platform/chat-app-sdk/1.2.0-beta.19/libs/cn/index.js';
+                    script.src = SDK_URL;
                     script.async = true;
-                    script.onload = resolve;
-                    script.onerror = reject;
+                    
+                    script.onload = function() {
+                        log('SDK脚本加载成功');
+                        resolve();
+                    };
+                    
+                    script.onerror = function(error) {
+                        log('SDK脚本加载失败: ' + error, 'error');
+                        reject(new Error('SDK脚本加载失败'));
+                    };
+                    
                     document.head.appendChild(script);
                 });
             }
 
+            function waitForSDK(maxWaitTime) {
+                return new Promise(function(resolve, reject) {
+                    var startTime = Date.now();
+                    
+                    function checkSDK() {
+                        if (window.CozeWebSDK) {
+                            log('SDK对象检测成功');
+                            resolve();
+                            return;
+                        }
+                        
+                        var elapsed = Date.now() - startTime;
+                        if (elapsed >= maxWaitTime) {
+                            log('等待SDK超时，已等待 ' + elapsed + 'ms', 'error');
+                            reject(new Error('等待SDK超时'));
+                            return;
+                        }
+                        
+                        log('SDK尚未就绪，继续等待... (已等待 ' + elapsed + 'ms)');
+                        setTimeout(checkSDK, RETRY_INTERVAL);
+                    }
+                    
+                    checkSDK();
+                });
+            }
+
             function initCozeChat() {
-                if (!window.CozeWebSDK) return;
+                if (cozeClientInitialized) {
+                    log('SDK已初始化，防止重复初始化', 'warn');
+                    return false;
+                }
+
+                if (!window.CozeWebSDK) {
+                    log('CozeWebSDK对象不存在，无法初始化', 'error');
+                    return false;
+                }
+
                 try {
-                    new CozeWebSDK.WebChatClient({
-                        config: { bot_id: '7623031433615163402' },
-                        componentProps: { title: 'Coze' },
+                    log('开始创建WebChatClient实例...');
+                    
+                    var client = new CozeWebSDK.WebChatClient({
+                        config: {
+                            bot_id: '7623031433615163402'
+                        },
+                        componentProps: {
+                            title: 'Coze'
+                        },
                         auth: {
                             type: 'token',
-                            token: 'pat_1I9MeAMsM5hH5yDvLvOnzEfXM00k6DCi9NSC6V0AIU6M6KhHDiqdIc78BlazGxC6',
+                            token: 'pat_Gwc8pPJX6H9h3mRAUO0es1MZqQ6BGgJ6FW1q8C4NgOdbRLDJNPWlcGNJF5roKXsQ',
                             onRefreshToken: function() {
-                                return 'pat_1I9MeAMsM5hH5yDvLvOnzEfXM00k6DCi9NSC6V0AIU6M6KhHDiqdIc78BlazGxC6';
+                                log('Token刷新被调用');
+                                return 'pat_Gwc8pPJX6H9h3mRAUO0es1MZqQ6BGgJ6FW1q8C4NgOdbRLDJNPWlcGNJF5roKXsQ';
                             }
                         }
                     });
-                } catch (e) {}
+                    
+                    cozeClientInitialized = true;
+                    log('WebChatClient实例创建成功');
+                    
+                    setTimeout(function() {
+                        setCozeZIndex();
+                    }, 500);
+                    
+                    return true;
+                } catch (error) {
+                    log('初始化失败: ' + error.message, 'error');
+                    if (error.stack) {
+                        log('错误堆栈: ' + error.stack, 'error');
+                    }
+                    return false;
+                }
+            }
+
+            function setCozeZIndex() {
+                var maxAttempts = 10;
+                var attempt = 0;
+                
+                function trySetZIndex() {
+                    attempt++;
+                    log('尝试设置z-index (第 ' + attempt + ' 次)');
+                    
+                    var iframes = document.querySelectorAll('iframe');
+                    var found = false;
+                    
+                    iframes.forEach(function(iframe) {
+                        var src = iframe.src || '';
+                        if (src.indexOf('coze') !== -1 || src.indexOf('chat') !== -1) {
+                            iframe.style.zIndex = '9999';
+                            iframe.style.position = 'relative';
+                            log('已设置Coze iframe的z-index为9999');
+                            found = true;
+                        }
+                    });
+                    
+                    var containers = document.querySelectorAll('[class*="coze"], [id*="coze"]');
+                    containers.forEach(function(container) {
+                        container.style.zIndex = '9999';
+                        container.style.position = 'relative';
+                        log('已设置Coze容器的z-index为9999');
+                        found = true;
+                    });
+                    
+                    if (!found && attempt < maxAttempts) {
+                        setTimeout(trySetZIndex, 500);
+                    } else if (!found) {
+                        log('未找到Coze相关元素，可能SDK尚未完全渲染', 'warn');
+                    }
+                }
+                
+                trySetZIndex();
+            }
+
+            function startInitialization() {
+                log('页面加载完成，开始SDK初始化流程');
+                
+                loadSDKScript()
+                    .then(function() {
+                        log('SDK脚本加载完成，等待SDK就绪...');
+                        return waitForSDK(MAX_WAIT_TIME);
+                    })
+                    .then(function() {
+                        log('SDK已就绪，开始初始化聊天窗口');
+                        return initCozeChat();
+                    })
+                    .then(function(success) {
+                        if (success) {
+                            log('=== SDK初始化完成 ===');
+                        } else {
+                            log('SDK初始化返回失败', 'warn');
+                        }
+                    })
+                    .catch(function(error) {
+                        log('初始化流程出错: ' + error.message, 'error');
+                        
+                        log('尝试重新加载SDK...');
+                        setTimeout(function() {
+                            loadSDKScript()
+                                .then(function() {
+                                    return waitForSDK(MAX_WAIT_TIME / 2);
+                                })
+                                .then(function() {
+                                    return initCozeChat();
+                                })
+                                .then(function() {
+                                    log('重试初始化完成');
+                                })
+                                .catch(function(e) {
+                                    log('重试失败: ' + e.message, 'error');
+                                });
+                        }, 2000);
+                    });
             }
 
             if (document.readyState === 'complete') {
-                loadSDK().then(initCozeChat);
+                log('页面已经加载完成');
+                startInitialization();
             } else {
-                window.addEventListener('load', function() {
-                    loadSDK().then(initCozeChat);
-                });
+                log('等待页面加载完成...');
+                window.addEventListener('load', startInitialization);
             }
+
+            window.addEventListener('error', function(event) {
+                if (event.filename && event.filename.indexOf('coze') !== -1) {
+                    log('SDK脚本错误: ' + event.message, 'error');
+                }
+            });
         })();
     </script>
 </body>
